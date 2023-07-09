@@ -1,6 +1,7 @@
-use std::fs::read_to_string;
+use std::{fs::read_to_string, process::ExitCode};
 
 use dialoguer::Confirm;
+use nix::unistd::Uid;
 
 fn get_modules() -> Vec<String> {
     let modules = read_to_string("/proc/modules").unwrap();
@@ -22,8 +23,18 @@ fn is_module_present(module: &str, modules: &Vec<String>) -> bool {
     false
 }
 
+fn is_root() -> Result<(), ExitCode> {
+    if !Uid::effective().is_root() {
+        eprintln!("This program has to be run with root permissions!");
+        Err(ExitCode::FAILURE)
+    } else {
+        Ok(())
+    }
+}
+
 //look for modules
-pub fn check_dependencies() {
+pub fn check_dependencies() -> Result<(), ExitCode> {
+    is_root()?;
     let supported_modules = ["nct6775"];
     let modules = get_modules();
     let mut found = false;
@@ -47,4 +58,5 @@ pub fn check_dependencies() {
             }
         }
     }
+    Ok(())
 }
