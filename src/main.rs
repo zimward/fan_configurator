@@ -1,6 +1,7 @@
-use std::fs::read_to_string;
+use std::{fs::read_to_string, path::PathBuf};
 
 use dialoguer::Confirm;
+use glob::glob;
 
 fn get_modules() -> Vec<String> {
     let modules = read_to_string("/proc/modules").unwrap();
@@ -49,6 +50,63 @@ fn check_dependencies() {
     }
 }
 
+fn search_fans() -> Vec<String> {
+    Vec::default()
+}
+
+fn ask_heat_src(path: &PathBuf) -> bool {
+    let mut value = read_to_string(path).unwrap();
+    value.pop();
+    let mut value: f32 = value.parse().unwrap();
+    value /= 1000.0;
+    let label = path.to_str().unwrap();
+    let label = label.replace("input", "label");
+    let name = read_to_string(label).unwrap();
+    println!(
+        "Found source {}",
+        path.canonicalize().unwrap().to_str().unwrap()
+    );
+    println!("Current value:{value}°C. Label:{name}");
+    Confirm::new()
+        .with_prompt("Do you want to add this heat source to config?")
+        .default(true)
+        .interact()
+        .unwrap_or(false)
+}
+
+fn search_heat_srcs() -> Vec<String> {
+    let mut srcs: Vec<String> = Vec::default();
+    let possible_paths = ["/sys/class/hwmon/hwmon*/temp*_input"];
+    for path in possible_paths.iter() {
+        //find matches
+        let paths = glob(path);
+        if paths.is_err() {
+            continue;
+        }
+        //unwrap if value was ok
+        let paths = paths.unwrap();
+        //remove err variants
+        let paths = paths.filter_map(|p| {
+            if let Ok(path) = p {
+                Some(path.clone())
+            } else {
+                None
+            }
+        });
+        for path in paths {
+            if ask_heat_src(&path) {
+                //resolve hwmon path
+                srcs.push(path.canonicalize().unwrap().to_str().unwrap().to_string());
+            }
+        }
+    }
+    for s in &srcs {
+        println!("{s}");
+    }
+    srcs
+}
+
 fn main() {
     //check_dependencies();
+    search_heat_srcs();
 }
