@@ -1,4 +1,4 @@
-use std::{fs::read_to_string, path::PathBuf};
+use std::{fs::read_to_string, io::Error, path::PathBuf};
 
 use dialoguer::Confirm;
 use glob::glob;
@@ -54,24 +54,24 @@ fn search_fans() -> Vec<String> {
     Vec::default()
 }
 
-fn ask_heat_src(path: &PathBuf) -> bool {
-    let mut value = read_to_string(path).unwrap();
+fn ask_heat_src(path: &PathBuf) -> Result<bool, Error> {
+    let mut value = read_to_string(path)?;
     value.pop();
-    let mut value: f32 = value.parse().unwrap();
+    let mut value: f32 = value.parse().unwrap_or(0.0);
     value /= 1000.0;
-    let label = path.to_str().unwrap();
+    let label = path.to_str().unwrap_or("");
     let label = label.replace("input", "label");
-    let name = read_to_string(label).unwrap();
+    let name = read_to_string(label)?;
     println!(
         "Found source {}",
-        path.canonicalize().unwrap().to_str().unwrap()
+        path.canonicalize()?.to_str().unwrap_or("")
     );
     println!("Current value:{value}°C. Label:{name}");
-    Confirm::new()
+    Ok(Confirm::new()
         .with_prompt("Do you want to add this heat source to config?")
         .default(true)
         .interact()
-        .unwrap_or(false)
+        .unwrap_or(false))
 }
 
 fn search_heat_srcs() -> Vec<String> {
@@ -94,9 +94,11 @@ fn search_heat_srcs() -> Vec<String> {
             }
         });
         for path in paths {
-            if ask_heat_src(&path) {
-                //resolve hwmon path
-                srcs.push(path.canonicalize().unwrap().to_str().unwrap().to_string());
+            if let Ok(add) = ask_heat_src(&path) {
+                if add {
+                    //resolve hwmon path
+                    srcs.push(path.canonicalize().unwrap().to_str().unwrap().to_string());
+                }
             }
         }
     }
