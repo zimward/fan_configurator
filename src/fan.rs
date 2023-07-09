@@ -1,4 +1,4 @@
-use dialoguer::{Confirm, Input};
+use dialoguer::{Confirm, Input, MultiSelect};
 use std::{
     fs::{read_to_string, write},
     io::Error,
@@ -23,15 +23,22 @@ pub struct Fan {
     heat_pressure_srcs: Vec<String>,
 }
 
-impl Default for Fan {
-    fn default() -> Self {
+impl Fan {
+    fn new(
+        name: String,
+        wildcard_path: String,
+        min_pwm: u8,
+        max_pwm: u8,
+        cutoff: bool,
+        heat_pressure_srcs: Vec<String>,
+    ) -> Self {
         Self {
-            name: "none".to_owned(),
-            wildcard_path: "/dev/null".to_owned(),
-            min_pwm: 0,
-            max_pwm: 255,
-            cutoff: false,
-            heat_pressure_srcs: Vec::default(),
+            name,
+            wildcard_path,
+            min_pwm,
+            max_pwm,
+            cutoff,
+            heat_pressure_srcs,
         }
     }
 }
@@ -44,12 +51,10 @@ fn enable_fan_pwm(path: &PathBuf, enable: bool) -> Result<(), Error> {
         let file = file.to_str().unwrap();
         pwm_enable.pop();
         pwm_enable.push(format!("{file}_enable"));
-        println!("enableing");
         match enable {
             true => write(pwm_enable.as_path(), "1")?,
             false => write(pwm_enable.as_path(), "0")?,
         }
-        println!("finished");
     }
     Ok(())
 }
@@ -72,16 +77,17 @@ fn read_rpm(path: &PathBuf) -> Result<u32, Error> {
     }
 }
 
-fn ask_fan(path: &PathBuf) -> Result<Option<Fan>, Error> {
+fn ask_fan(path: &PathBuf, heat_srcs: Option<&Vec<String>>) -> Result<Option<Fan>, Error> {
     let canonical_path = path.canonicalize()?;
+    let heat_srcs = heat_srcs.unwrap();
     //enable manual pwm control
-    //enable_fan_pwm(path, true)?;
+    enable_fan_pwm(path, true)?;
     //ramp fan up
     println!(
         "Ramping fan {} up...",
         canonical_path.to_str().unwrap_or("error")
     );
-    //write(path, "255")?;
+    write(path, "255")?;
     //wait for fan to reach rpm
     thread::sleep(Duration::from_secs(3));
     //check rpm
@@ -93,16 +99,22 @@ fn ask_fan(path: &PathBuf) -> Result<Option<Fan>, Error> {
     println!("Fan reached rpm of {rpm}");
     println!("Undulating Fan for easier identification.");
     let undulate = Arc::new(AtomicBool::new(true));
-    let handle = {
+    {
         let copy = path.clone();
         let undulate = Arc::clone(&undulate);
         thread::spawn(move || {
             //ignore failed writes
-            while undulate.load(Ordering::Relaxed) {
+            loop {
                 let _ = write(&copy, "0");
                 thread::sleep(Duration::from_secs(10));
+                if !undulate.load(Ordering::Relaxed) {
+                    break;
+                }
                 let _ = write(&copy, "255");
                 thread::sleep(Duration::from_secs(10));
+                if !undulate.load(Ordering::Relaxed) {
+                    break;
+                }
             }
         })
     };
@@ -114,20 +126,95 @@ fn ask_fan(path: &PathBuf) -> Result<Option<Fan>, Error> {
         .unwrap_or(false)
     {
         undulate.store(false, Ordering::Relaxed);
-        enable_fan_pwm(path, false)?;
-        let _ = handle.join();
         let name: String = Input::new().with_prompt("Enter fan name").interact_text()?;
 
-        Ok(Some(Fan::default()))
+        let mut heat_pressure_srcs: Vec<usize>;
+        loop {
+            heat_pressure_srcs = MultiSelect::new()
+                .with_prompt("Select heat pressure sources")
+                .items(heat_srcs)
+                .interact()?;
+            if heat_pressure_srcs.len() == 0 {
+                println!("You must select at leat one heat pressure source!");
+            } else {
+                break;
+            }
+        }
+        let heat_pressure_srcs = heat_pressure_srcs
+            .iter()
+            .filter_map(|index| heat_srcs.get(*index))
+            .map(|a| a.clone())
+            .collect();
+
+        //min pwm
+        println!("Searching minimum pwm value. This can take a while.");
+        let mut min_pwm: u8 = 0;
+        write(path, "0")?;
+        println!("Waiting for fan to stop.");
+        let mut rpm = 0;
+        for _ in 0..30 {
+            thread::sleep(Duration::from_secs(1));
+            rpm = read_rpm(path)?;
+            if rpm == 0 {
+                break;
+            }
+        }
+        if rpm == 0 {
+            println!("Fan stopped.");
+            println!("Searching the start pwm value of the fan.");
+            loop {
+                min_pwm = min_pwm.saturating_add(1);
+                write(path, min_pwm.to_string())?;
+                thread::sleep(Duration::from_millis(500));
+                let rpm = read_rpm(path)?;
+                if rpm != 0 {
+                    println!("Fan starts spinning at {min_pwm}.");
+                    break;
+                }
+            }
+        } else {
+            println!("Fan seems to be unable to stop. selecting 0 as min pwm.");
+        }
+
+        //max pwm
+        let mut max_pwm: u8 = 255;
+        println!("Setting fan pwm to {max_pwm}");
+        loop {
+            write(path, max_pwm.to_string())?;
+            if Confirm::new()
+                .with_prompt("Is this maximum fan speed quiet enough for you")
+                .interact()?
+            {
+                break;
+            }
+            max_pwm = max_pwm.saturating_sub(5);
+            if max_pwm <= min_pwm {
+                max_pwm = min_pwm;
+                println!("Selecting min pwm as max pwm value. Are you sure you want it to be this low? (Fan is going to constantly run at minimum speed)");
+                break;
+            }
+        }
+        let cutoff = Confirm::new()
+            .with_prompt("Should the fan be stopped when minimum pwm is reached")
+            .interact()?;
+
+        enable_fan_pwm(path, false)?;
+        Ok(Some(Fan::new(
+            name,
+            path.to_string_lossy().to_string(),
+            min_pwm,
+            max_pwm,
+            cutoff,
+            heat_pressure_srcs,
+        )))
     } else {
         undulate.store(false, Ordering::Relaxed);
         enable_fan_pwm(path, false)?;
-        let _ = handle.join();
         Ok(None)
     }
 }
 
-pub fn search_fans() -> Vec<Fan> {
+pub fn search_fans(heat_srcs: Vec<String>) -> Vec<Fan> {
     let possible_paths = ["/sys/class/hwmon/hwmon*/pwm*[0-9]"];
-    search_paths(&possible_paths, ask_fan)
+    search_paths(&possible_paths, ask_fan, Some(&heat_srcs))
 }

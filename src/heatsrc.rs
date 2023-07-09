@@ -2,9 +2,13 @@ use dialoguer::{Confirm, Input};
 use glob::glob;
 use std::{fs::read_to_string, io::Error, path::PathBuf};
 
-pub fn search_paths<F, R>(possible_paths: &[&str], question_fn: F) -> Vec<R>
+pub fn search_paths<F, R>(
+    possible_paths: &[&str],
+    question_fn: F,
+    param: Option<&Vec<String>>,
+) -> Vec<R>
 where
-    F: Fn(&PathBuf) -> Result<Option<R>, Error>,
+    F: Fn(&PathBuf, Option<&Vec<String>>) -> Result<Option<R>, Error>,
 {
     let mut srcs: Vec<R> = Vec::default();
     for path in possible_paths.iter() {
@@ -25,7 +29,7 @@ where
         });
         for path in paths {
             //if parameterization fails at one step fan/heatsrc is ignored
-            if let Ok(val) = question_fn(&path) {
+            if let Ok(val) = question_fn(&path, param) {
                 if let Some(toadd) = val {
                     //resolve hwmon path
                     //failing should be impossible at this point
@@ -63,7 +67,7 @@ impl HeatSrc {
     }
 }
 
-fn ask_heat_src(path: &PathBuf) -> Result<Option<HeatSrc>, Error> {
+fn ask_heat_src(path: &PathBuf, _: Option<&Vec<String>>) -> Result<Option<HeatSrc>, Error> {
     let mut value = read_to_string(path)?;
     value.pop();
     let mut value: f32 = value.parse().unwrap_or(0.0);
@@ -107,5 +111,5 @@ fn ask_heat_src(path: &PathBuf) -> Result<Option<HeatSrc>, Error> {
 
 pub fn search_heat_srcs() -> Vec<HeatSrc> {
     let possible_paths = ["/sys/class/hwmon/hwmon*/temp*_input"];
-    search_paths(&possible_paths, ask_heat_src)
+    search_paths(&possible_paths, ask_heat_src, None)
 }
