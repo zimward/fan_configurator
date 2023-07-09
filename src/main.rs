@@ -1,54 +1,10 @@
 use std::{fs::read_to_string, io::Error, path::PathBuf};
 
+use deps::check_dependencies;
 use dialoguer::Confirm;
 use glob::glob;
 
-fn get_modules() -> Vec<String> {
-    let modules = read_to_string("/proc/modules").unwrap();
-    let mut mods: Vec<String> = Vec::default();
-    for line in modules.split_terminator('\n') {
-        if let Some(m) = line.split_once(' ') {
-            mods.push(m.0.to_string());
-        }
-    }
-    mods
-}
-
-fn is_module_present(module: &str, modules: &Vec<String>) -> bool {
-    for m in modules {
-        if module == m {
-            return true;
-        }
-    }
-    false
-}
-
-//look for modules
-fn check_dependencies() {
-    let supported_modules = ["nct6775"];
-    let modules = get_modules();
-    let mut found = false;
-    for m in supported_modules.iter() {
-        let present = is_module_present(&m, &modules);
-        if present {
-            println!("Found module {m}!");
-            found = true;
-        }
-    }
-    if found {
-        println!("No fan/sensor modules have been loaded!");
-        if Confirm::new()
-            .with_prompt("Do you want to try loading possible modules?")
-            .default(true)
-            .interact()
-            .unwrap()
-        {
-            for m in supported_modules.iter() {
-                println!("Trying to load {m}");
-            }
-        }
-    }
-}
+mod deps;
 
 fn search_fans() -> Vec<String> {
     Vec::default()
@@ -74,9 +30,11 @@ fn ask_heat_src(path: &PathBuf) -> Result<bool, Error> {
         .unwrap_or(false))
 }
 
-fn search_heat_srcs() -> Vec<String> {
+fn search_paths<F>(possible_paths: &[&str], question_fn: F) -> Vec<String>
+where
+    F: Fn(&PathBuf) -> Result<bool, Error>,
+{
     let mut srcs: Vec<String> = Vec::default();
-    let possible_paths = ["/sys/class/hwmon/hwmon*/temp*_input"];
     for path in possible_paths.iter() {
         //find matches
         let paths = glob(path);
@@ -94,21 +52,24 @@ fn search_heat_srcs() -> Vec<String> {
             }
         });
         for path in paths {
-            if let Ok(add) = ask_heat_src(&path) {
+            if let Ok(add) = question_fn(&path) {
                 if add {
                     //resolve hwmon path
+                    //failing should be impossible at this point
                     srcs.push(path.canonicalize().unwrap().to_str().unwrap().to_string());
                 }
             }
         }
     }
-    for s in &srcs {
-        println!("{s}");
-    }
     srcs
 }
 
+fn search_heat_srcs() -> Vec<String> {
+    let possible_paths = ["/sys/class/hwmon/hwmon*/temp*_input"];
+    search_paths(&possible_paths, ask_heat_src)
+}
+
 fn main() {
-    //check_dependencies();
+    check_dependencies();
     search_heat_srcs();
 }
