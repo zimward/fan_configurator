@@ -94,22 +94,10 @@ fn ask_heat_src(path: &PathBuf, _: Option<&Vec<String>>) -> Result<Option<HeatSr
         let name: String = Input::new()
             .with_prompt("Enter heat pressure source name")
             .interact_text()?;
-        let set_point: String = Input::new()
+        let set_point: f32 = Input::new()
             .with_prompt("Enter setpoint (°C)")
-            .validate_with(|input: &String| {
-                for c in input.chars() {
-                    if c.is_alphabetic() {
-                        return Err("You may only enter a number.");
-                    }
-                }
-                Ok(())
-            })
             .interact_text()?;
-        Ok(Some(HeatSrc::new(
-            name,
-            full_path,
-            set_point.parse().unwrap_or(60.0),
-        )))
+        Ok(Some(HeatSrc::new(name, full_path, set_point)))
     } else {
         Ok(None)
     }
