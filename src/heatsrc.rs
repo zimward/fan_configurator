@@ -1,5 +1,6 @@
 use dialoguer::{Confirm, Input};
 use glob::glob;
+use serde::Serialize;
 use std::{fs::read_to_string, io::Error, path::PathBuf};
 
 pub fn search_paths<F, R>(
@@ -40,17 +41,22 @@ where
     }
     srcs
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "UPPERCASE")]
 pub struct Pid {
-    set_point: f32,
-    p: f32,
-    i: f32,
-    d: f32,
+    #[serde(rename = "set_point")]
+    pub set_point: f32,
+    pub p: f32,
+    pub i: f32,
+    pub d: f32,
 }
 
+#[derive(Serialize)]
 pub struct HeatSrc {
-    name: String,
-    wildcard_path: String,
-    pid_params: Pid,
+    pub name: String,
+    pub wildcard_path: String,
+    pub pid_params: Pid,
 }
 impl HeatSrc {
     fn new(name: String, wildcard_path: String, set_point: f32) -> Self {

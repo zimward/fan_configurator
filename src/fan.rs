@@ -2,8 +2,7 @@ use dialoguer::{Confirm, Input, MultiSelect};
 use std::{
     fs::{read_to_string, write},
     io::Error,
-    path::{Path, PathBuf},
-    rc::Rc,
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -12,13 +11,26 @@ use std::{
     time::Duration,
 };
 
+use serde::Serialize;
+
 use crate::heatsrc::search_paths;
 
+fn default_max(val: &u8) -> bool {
+    *val == 0xFF
+}
+
+fn default_cutoff(cutoff: &bool) -> bool {
+    !*cutoff
+}
+
+#[derive(Serialize)]
 pub struct Fan {
     name: String,
     wildcard_path: String,
     min_pwm: u8,
+    #[serde(skip_serializing_if = "default_max")]
     max_pwm: u8,
+    #[serde(skip_serializing_if = "default_cutoff")]
     cutoff: bool,
     heat_pressure_srcs: Vec<String>,
 }
